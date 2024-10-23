@@ -9,10 +9,10 @@ class Display_XML(Tk):
     def __init__(self):
         self.prev_XML_path_file = ""
         self.XML_path_file = ""
-        self.columns_to_show = ("text")
+        self.columns_to_show = ("name")
         self.info_table = {}
         self.nsToDisplay = {'': True}
-        self.printNs = True
+        
         super().__init__()
         self.title("Display XML")
         self.geometry("1000x800")
@@ -26,10 +26,18 @@ class Display_XML(Tk):
 
         self.buttonClear = ttk.Button(self.settings_frame, text="Clear", command=self.clear)
         self.buttonSettings = ttk.Button(self.settings_frame, text="Settings", command=self.settings)
+        self.printNs = True
+        self.checkButtonNs = ttk.Checkbutton(self.settings_frame, text='Display namespaces', command = self.onClickCheck, variable = BooleanVar(value=self.printNs))
 
         # Create a frame for the XML tree
         self.tree_frame = Frame(self, padx=10, pady=10)
         self.tree_frame.pack(expand=True, fill="both")
+
+    def onClickCheck(self):
+        # Update printNs
+        self.printNs = not self.printNs
+        # Destroy and display treeview
+        self.explore_file()
 
     def import_file(self):
         filename = filedialog.askopenfilename(  initialdir = "/",
@@ -51,10 +59,7 @@ class Display_XML(Tk):
         self.treeview_file = ttk.Treeview(self.tree_frame, columns=self.columns_to_show, show="tree headings")
         self.treeview_file.bind("<ButtonRelease-1>", self.on_click)
         self.treeview_file.heading("#0", text="Structure")
-        self.treeview_file.heading("text", text="Text")
-
-        
-
+        self.treeview_file.heading("name", text="name")
         # Add the content to the treeview
         self.content = self.get_content(self.XML_path_file)
         if len(self.content) > 0: self.display()
@@ -78,6 +83,7 @@ class Display_XML(Tk):
         try:
             self.buttonClear.pack_forget()
             self.buttonSettings.pack_forget()
+            self.checkButtonNs.pack_forget()
         except:
             pass
         if self.nsToDisplay[ns]:
@@ -88,6 +94,7 @@ class Display_XML(Tk):
             self.display_information()
             
             self.buttonClear.pack(side = "left", padx=10, pady=10)
+            self.checkButtonNs.pack(side = "left", padx=10, pady=10)
             
             # self.buttonSettings.pack(side = "left", padx=10, pady=10)
 
@@ -131,6 +138,7 @@ class Display_XML(Tk):
         self.tree_frame.pack(expand=True, fill="both")
         self.buttonClear.pack_forget()
         self.buttonSettings.pack_forget()
+        self.checkButtonNs.pack_forget()
         self.prev_XML_path_file = ""
 
     def get_namespaces(self):
@@ -145,10 +153,43 @@ class Display_XML(Tk):
         self.treeview_info = ttk.Treeview(self.tree_frame, columns=("value"), show="tree headings")
         self.treeview_info.heading("#0", text="attribute")
         self.treeview_info.heading("value", text="value")
+        self.treeview_info.bind("<Button-3>", self.goToRef)
         self.treeview_info.pack(expand=True, fill="both", padx=10, pady=10, side="right")
 
+    def openParents(self, item):
+        parent_id = self.treeview_file.parent(item)
+        while parent_id:
+            self.treeview_file.item(parent_id, open=True)
+            parent_id = self.treeview_file.parent(parent_id)
+
+    def goToRef(self, event):
+        iid = self.treeview_info.identify_row(event.y)
+        if iid:
+            # mouse pointer over item
+            self.treeview_info.selection_set(iid)
+            ref = self.treeview_info.item(iid)["values"]
+            # Try to find the ref by Id
+            found, item = self.findElemById(ref[0])
+            if found:
+                self.openParents(item)
+                self.treeview_file.item(item, open = True)
+                self.treeview_file.selection_set(item)
+                print(self.treeview_file.item(item))
+        else:
+            # mouse pointer not over item
+            # occurs when items do not fill frame
+            # no action required
+            pass
+
+    def findElemById(self, id):
+        # Browse infoTable
+        for k,v in self.info_table.items():
+            if self.getAttribute(v,"id") == id:
+                return True, k
+        return False, None
+        
     def on_click(self, event):
-        print(self.treeview_file.selection())
+        # print(self.treeview_file.selection())
         item = self.treeview_file.selection()[0]
         self.updateTreeviewInfo(item)
 
@@ -163,7 +204,7 @@ class Display_XML(Tk):
             self.treeview_info.insert("", "end", text=key, values=v)
         txt = (self.info_table[item].text).strip() if self.info_table[item].text is not None else ""
         if len(txt) > 0:
-            self.treeview_info.insert("", "end", text="Text", values=(txt,))
+            self.treeview_info.insert("", "end", text="text", values=(txt,))
         
     def put_content(self, child_list, parent):
         if len(child_list) == 0:
@@ -184,11 +225,15 @@ class Display_XML(Tk):
                 childTag = child.tag
             # print(ns)
             if self.nsToDisplay[ns]:
-                id = self.treeview_file.insert(parent, "end", text=childTag, values=(child.text,))
+                id = self.treeview_file.insert(parent, "end", text=childTag, values=(self.getAttribute(child, "name"),))
                 self.info_table[id] = child
-                if len(child) > 1:
+                if len(child) >= 1:
                     # get children of the current child
                     self.put_content(child, parent=id)
+
+    def getAttribute(self, item, att):
+        if att != "text": return item.attrib[att] if att in item.attrib.keys() else ""
+        else : return item.text if len(item.text)!=-1 else ""
 
     def get_content(self, file):
         root = ""
@@ -202,6 +247,7 @@ class Display_XML(Tk):
                 # If the file is not a valid XML file -> display an error message in a popup window
                 tkinter.messagebox.showerror("Error", "The file is not a valid XML file")
                 # Reload the previous file
+                self.XML_path_file = self.prev_XML_path_file
                 root = self.get_content(self.prev_XML_path_file)
         return root
 
